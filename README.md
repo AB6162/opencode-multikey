@@ -67,7 +67,7 @@ To pin a version:
 
 ```jsonc
 {
-  "plugins": ["opencode-multikey@0.1.1"]
+  "plugins": ["opencode-multikey@0.1.2"]
 }
 ```
 
@@ -137,6 +137,7 @@ Dashboard keys:
 
 | Key | Action |
 | --- | --- |
+| `esc` | Close the dashboard and return to OpenCode |
 | `a` | Account actions: use, move up/down in priority, enable/disable, reset cooldown/auth, mark 5h/weekly/monthly, rename, activate natively, remove |
 | `n` | Instructions to add another key through `/connect` |
 | `b` | Toggle balancing on/off |
@@ -327,7 +328,7 @@ OAuth and well-known accounts cannot be migrated automatically; reconnect them w
 | --- | --- |
 | Plugin does not load | `plugins` is plural; OpenCode is V2; restart OpenCode |
 | Dashboard does not appear | The package is listed in `opencode.json`; no `tui.json` is needed; try `/multikey` |
-| Dashboard stays on “Loading…” | Update to `opencode-multikey@0.1.1` or newer and restart OpenCode |
+| Dashboard stays on “Loading…” | Update to `opencode-multikey@0.1.2` or newer and restart OpenCode |
 | `opencode plugin list` does not show it | Check the config scope (global vs project) and restart the service |
 | No accounts | Run `/connect` twice and select OpenCode Go each time |
 | Provider is not managed | `providers` includes the provider ID; check the dashboard's `t` view |
@@ -422,8 +423,8 @@ Before publishing:
 4. Commit and tag the release:
 
 ```bash
-git tag v0.1.1
-git push origin v0.1.1
+git tag v0.1.2
+git push origin v0.1.2
 ```
 
 The package publishes TypeScript source. OpenCode loads it with Bun.
@@ -431,8 +432,9 @@ The package publishes TypeScript source. OpenCode loads it with Bun.
 ## Validation performed
 
 - TypeScript typecheck against `@opencode/plugin` 2.1.4.
-- 73 unit and hook-flow tests.
+- 84 unit, TUI and hook-flow tests.
 - Loaded with OpenCode 2.1.3 as a local plugin with `features: { server: true, tui: true }` and state `active`.
+- Verified the dashboard end-to-end with OpenCode 2.1.3's headless TUI: the saved OpenCode Go account renders with its location-scoped RPC, and `escape` returns to the home screen.
 - Manual end-to-end test with a fake OpenAI-compatible provider: key A returned `429 GoUsageLimitError` with `retry-after: 18000`, key B returned a valid SSE response, and OpenCode completed the run. No real provider quota was consumed.
 - `npm pack` tarball imported successfully as `opencode-multikey`, `opencode-multikey/rpc` and `opencode-multikey/tui`.
 - `npm publish --dry-run` completed successfully.

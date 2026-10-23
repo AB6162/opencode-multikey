@@ -3,11 +3,12 @@ import { Plugin } from "@opencode/plugin/tui"
 import { MultikeyRpc } from "./rpc"
 import { Dashboard } from "./tui/dashboard"
 import { StatusSlot } from "./tui/status-slot"
+import { sameDirectory, scopedRpc } from "./tui/types"
 
 export default Plugin.define({
   id: "opencode-multikey.tui",
   setup(context) {
-    const rpc = context.client.rpc(MultikeyRpc)
+    const rpc = scopedRpc(context, context.client.rpc(MultikeyRpc))
 
     const unregisterRoute = context.ui.router.register({
       name: "opencode-multikey",
@@ -48,6 +49,15 @@ export default Plugin.define({
       context.options.toast === false
         ? undefined
         : rpc.events.on("updated", (event) => {
+            const location = context.location ?? context.data.location.default()
+            if (
+              !sameDirectory(
+                event.location?.directory,
+                location?.directory,
+              )
+            ) {
+              return
+            }
             const data = event.data as {
               kind?: string
               modelID?: string

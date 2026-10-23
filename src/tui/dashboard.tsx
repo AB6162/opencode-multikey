@@ -21,6 +21,8 @@ export function Dashboard(props: {
   const [status, setStatus] = createSignal<StatusOutput | undefined>()
   const [targets, setTargets] = createSignal<TargetSummary[]>([])
   const [error, setError] = createSignal<string | undefined>()
+  const [loaded, setLoaded] = createSignal(false)
+  const [loading, setLoading] = createSignal(false)
   const [now, setNow] = createSignal(Date.now())
   let running = false
 
@@ -31,19 +33,37 @@ export function Dashboard(props: {
   async function refresh() {
     if (running) return
     running = true
+    setLoading(true)
     try {
       const next = (await props.rpc.status(currentInput())) as StatusOutput
       setStatus(next)
-      const targetResult = (await props.rpc.targets({})) as {
-        targets: TargetSummary[]
-      }
-      setTargets(targetResult.targets)
+      setLoaded(true)
       setError(undefined)
+      try {
+        const targetResult = (await props.rpc.targets({})) as {
+          targets: TargetSummary[]
+        }
+        setTargets(targetResult.targets)
+      } catch (cause) {
+        // A failed provider listing must not hide a valid account snapshot.
+        setError(errorText(cause))
+      }
     } catch (cause) {
       setError(errorText(cause))
     } finally {
       running = false
+      setLoading(false)
     }
+  }
+
+  function closeDashboard() {
+    props.context.ui.router.navigate({ type: "home" })
+  }
+
+  function headerText(): string {
+    if (status()) return statusHeader(status())
+    if (error()) return "Unable to load opencode-multikey."
+    return "Loading opencode-multikey…"
   }
 
   async function toast(message: string, variant: "info" | "success" | "warning" | "error" = "info") {
@@ -231,6 +251,74 @@ export function Dashboard(props: {
     }
   }
 
+  // Register the page commands from the component body so they exist even if
+  // one of the data subscriptions below fails. OpenCode disposes layers that
+  // a component creates when the route unmounts.
+  props.context.keymap.layer(() => ({
+    mode: "global",
+    // Let an open dialog keep escape for itself; this layer only needs it when
+    // the dashboard is the topmost surface.
+    priority: -1,
+    commands: [
+      {
+        id: "opencode-multikey.close",
+        title: "Close Multikey dashboard",
+        group: "Multikey",
+        palette: true,
+        bind: "escape",
+        run: () => closeDashboard(),
+      },
+      {
+        id: "opencode-multikey.actions",
+        title: "Multikey account actions",
+        group: "Multikey",
+        palette: true,
+        bind: "a",
+        run: () => void accountActions(),
+      },
+      {
+        id: "opencode-multikey.add",
+        title: "Add a Multikey account",
+        group: "Multikey",
+        palette: true,
+        bind: "n",
+        run: () => void addAccount(),
+      },
+      {
+        id: "opencode-multikey.toggle",
+        title: "Toggle Multikey balancing",
+        group: "Multikey",
+        palette: true,
+        bind: "b",
+        run: () => void toggleBalancing(),
+      },
+      {
+        id: "opencode-multikey.diagnostics",
+        title: "Show Multikey diagnostics",
+        group: "Multikey",
+        palette: true,
+        bind: "g",
+        run: () => void showDiagnostics(),
+      },
+      {
+        id: "opencode-multikey.targets",
+        title: "Show managed providers",
+        group: "Multikey",
+        palette: true,
+        bind: "t",
+        run: () => void showTargets(),
+      },
+      {
+        id: "opencode-multikey.refresh",
+        title: "Refresh Multikey",
+        group: "Multikey",
+        palette: true,
+        bind: "r",
+        run: () => void refresh(),
+      },
+    ],
+  }))
+
   onMount(() => {
     void refresh()
     const clock = setInterval(() => setNow(Date.now()), 1_000)
@@ -248,60 +336,6 @@ export function Dashboard(props: {
       void refresh()
     })
 
-    props.context.keymap.layer(() => ({
-      mode: "global",
-      commands: [
-        {
-          id: "opencode-multikey.actions",
-          title: "Multikey account actions",
-          group: "Multikey",
-          palette: true,
-          bind: "a",
-          run: () => void accountActions(),
-        },
-        {
-          id: "opencode-multikey.add",
-          title: "Add a Multikey account",
-          group: "Multikey",
-          palette: true,
-          bind: "n",
-          run: () => void addAccount(),
-        },
-        {
-          id: "opencode-multikey.toggle",
-          title: "Toggle Multikey balancing",
-          group: "Multikey",
-          palette: true,
-          bind: "b",
-          run: () => void toggleBalancing(),
-        },
-        {
-          id: "opencode-multikey.diagnostics",
-          title: "Show Multikey diagnostics",
-          group: "Multikey",
-          palette: true,
-          bind: "g",
-          run: () => void showDiagnostics(),
-        },
-        {
-          id: "opencode-multikey.targets",
-          title: "Show managed providers",
-          group: "Multikey",
-          palette: true,
-          bind: "t",
-          run: () => void showTargets(),
-        },
-        {
-          id: "opencode-multikey.refresh",
-          title: "Refresh Multikey",
-          group: "Multikey",
-          palette: true,
-          bind: "r",
-          run: () => void refresh(),
-        },
-      ],
-    }))
-
     onCleanup(() => {
       clearInterval(clock)
       clearInterval(poll)
@@ -315,12 +349,30 @@ export function Dashboard(props: {
   return (
     <box flexDirection="column" padding={1}>
       <text>opencode-multikey</text>
-      <text>{statusHeader(status())}</text>
-      <text>{statusSummary(status())}</text>
+      <text>{headerText()}</text>
+      <Show when={status()}>
+        <text>{statusSummary(status())}</text>
+      </Show>
+      <Show when={loading() && status()}>
+        <text>Refreshing…</text>
+      </Show>
       <Show when={error()}>
         <text>{`Error: ${error()}`}</text>
+        <text>Press r to retry or esc to return home.</text>
       </Show>
-      <Show when={(status()?.accounts.length ?? 0) === 0}>
+      <Show when={loaded() && status() && !status()?.integrationID}>
+        <text>
+          This provider is not managed by opencode-multikey. Press t to list
+          managed providers.
+        </text>
+      </Show>
+      <Show
+        when={
+          loaded() &&
+          (status()?.integrationID?.length ?? 0) > 0 &&
+          (status()?.accounts.length ?? 0) === 0
+        }
+      >
         <text>No key accounts. Press n for instructions.</text>
       </Show>
       <For each={status()?.accounts ?? []}>
@@ -332,7 +384,7 @@ export function Dashboard(props: {
           .join(", ")}`}</text>
       </Show>
       <text>
-        a account actions · n add key · b toggle balancing · g diagnostics · t providers · r refresh
+        esc close · a account actions · n add key · b toggle balancing · g diagnostics · t providers · r refresh
       </text>
     </box>
   )

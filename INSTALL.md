@@ -35,7 +35,7 @@ To pin a version:
 
 ```jsonc
 {
-  "plugins": ["opencode-multikey@0.1.1"]
+  "plugins": ["opencode-multikey@0.1.2"]
 }
 ```
 
@@ -141,7 +141,7 @@ Both files are required for the dashboard. Restart OpenCode after creating them.
 - Plugin not loaded: confirm OpenCode V2, `plugins` plural, and restart.
 - No accounts: run `/connect` twice for the same provider.
 - No dashboard: confirm the package is listed in `opencode.json`; no `tui.json` is needed.
-- Dashboard stays on “Loading…” or shows `Object Object`: update to `opencode-multikey@0.1.1` or newer and restart OpenCode.
+- Dashboard stays on “Loading…” or shows `Object Object`: update to `opencode-multikey@0.1.2` or newer and restart OpenCode.
 - Both keys cooling: wait for the reset, reset a cooldown from the dashboard, or add another independent key.
 - Provider not managed: check `providers` in the plugin options.
 - Key does not switch: enable `diagnostics` and inspect the error type/status.

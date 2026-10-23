@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.2
+
+- Fixed the TUI calling the plugin RPC without its location, which made every
+  request fail with `rpc.unavailable` and left the dashboard on “Loading…” with
+  no accounts.
+- Bound every TUI RPC call to the location of the running plugin instance.
+- Added `escape` to close the dashboard and return to OpenCode.
+- The dashboard no longer shows “No key accounts” while it is loading or after
+  an RPC error; it shows the real error and a retry hint instead.
+- Filtered failover toasts by location so one project no longer shows another
+  project's notifications.
+
 ## 0.1.1
 
 - Fixed the TUI dashboard staying on “Loading…” when OpenCode reports `null` provider/model IDs.
