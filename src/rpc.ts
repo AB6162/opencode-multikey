@@ -6,6 +6,18 @@ const emptyObject = {
   additionalProperties: false,
 } as const
 
+const nullableString = {
+  anyOf: [{ type: "string" }, { type: "null" }],
+} as const
+
+const nullableNumber = {
+  anyOf: [{ type: "number" }, { type: "null" }],
+} as const
+
+const nullableEmptyObject = {
+  anyOf: [emptyObject, { type: "null" }],
+} as const
+
 const accountStatus = {
   type: "object",
   properties: {
@@ -136,15 +148,15 @@ export const MultikeyRpc = Rpc.define({
       input: {
         type: "object",
         properties: {
-          providerID: { type: "string" },
-          modelID: { type: "string" },
+          providerID: nullableString,
+          modelID: nullableString,
         },
         additionalProperties: false,
       },
       output: statusOutput,
     },
     targets: {
-      input: emptyObject,
+      input: nullableEmptyObject,
       output: {
         type: "object",
         properties: {
@@ -158,7 +170,7 @@ export const MultikeyRpc = Rpc.define({
       input: {
         type: "object",
         properties: {
-          providerID: { type: "string" },
+          providerID: nullableString,
           credentialIDs: { type: "array", items: { type: "string" } },
         },
         required: ["credentialIDs"],
@@ -170,9 +182,9 @@ export const MultikeyRpc = Rpc.define({
       input: {
         type: "object",
         properties: {
-          providerID: { type: "string" },
+          providerID: nullableString,
           credentialID: { type: "string" },
-          modelID: { type: "string" },
+          modelID: nullableString,
         },
         required: ["credentialID"],
         additionalProperties: false,
@@ -183,7 +195,7 @@ export const MultikeyRpc = Rpc.define({
       input: {
         type: "object",
         properties: {
-          providerID: { type: "string" },
+          providerID: nullableString,
           credentialID: { type: "string" },
           enabled: { type: "boolean" },
         },
@@ -196,9 +208,9 @@ export const MultikeyRpc = Rpc.define({
       input: {
         type: "object",
         properties: {
-          providerID: { type: "string" },
+          providerID: nullableString,
           credentialID: { type: "string" },
-          modelID: { type: "string" },
+          modelID: nullableString,
         },
         required: ["credentialID"],
         additionalProperties: false,
@@ -209,9 +221,9 @@ export const MultikeyRpc = Rpc.define({
       input: {
         type: "object",
         properties: {
-          providerID: { type: "string" },
+          providerID: nullableString,
           credentialID: { type: "string" },
-          modelID: { type: "string" },
+          modelID: nullableString,
           reason: {
             type: "string",
             enum: [
@@ -223,7 +235,7 @@ export const MultikeyRpc = Rpc.define({
               "server-error",
             ],
           },
-          durationMs: { type: "number" },
+          durationMs: nullableNumber,
         },
         required: ["credentialID", "reason"],
         additionalProperties: false,
@@ -247,8 +259,8 @@ export const MultikeyRpc = Rpc.define({
       input: {
         type: "object",
         properties: {
-          providerID: { type: "string" },
-          limit: { type: "number" },
+          providerID: nullableString,
+          limit: nullableNumber,
         },
         additionalProperties: false,
       },
@@ -265,7 +277,7 @@ export const MultikeyRpc = Rpc.define({
       input: {
         type: "object",
         properties: {
-          providerID: { type: "string" },
+          providerID: nullableString,
         },
         additionalProperties: false,
       },

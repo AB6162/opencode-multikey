@@ -6,10 +6,12 @@ import {
   accountHealthText,
   accountLine,
   diagnosticsText,
+  errorText,
   statusHeader,
   statusSummary,
   targetsText,
 } from "./format"
+import { modelIDOf, modelInput, textValue } from "./input"
 import type { MultikeyRpcClient } from "./types"
 
 export function Dashboard(props: {
@@ -23,18 +25,14 @@ export function Dashboard(props: {
   let running = false
 
   const model = () => props.context.ui.model.current()
-  const providerID = () => model()?.providerID
-  const modelID = () => model()?.modelID
+  const currentInput = () => modelInput(model())
+  const modelID = () => modelIDOf(model())
 
   async function refresh() {
     if (running) return
     running = true
     try {
-      const current = model()
-      const next = (await props.rpc.status({
-        providerID: current?.providerID,
-        modelID: current?.modelID,
-      })) as StatusOutput
+      const next = (await props.rpc.status(currentInput())) as StatusOutput
       setStatus(next)
       const targetResult = (await props.rpc.targets({})) as {
         targets: TargetSummary[]
@@ -42,7 +40,7 @@ export function Dashboard(props: {
       setTargets(targetResult.targets)
       setError(undefined)
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause))
+      setError(errorText(cause))
     } finally {
       running = false
     }
@@ -73,15 +71,17 @@ export function Dashboard(props: {
         "success",
       )
     } catch (cause) {
-      await toast(cause instanceof Error ? cause.message : String(cause), "error")
+      await toast(errorText(cause), "error")
     }
   }
 
   async function showDiagnostics() {
     try {
       const current = status()
+      const providerID =
+        textValue(current?.providerID) ?? currentInput().providerID
       const result = (await props.rpc.diagnostics({
-        providerID: current?.providerID,
+        ...(providerID ? { providerID } : {}),
         limit: 20,
       })) as { entries: DiagnosticEntry[] }
       await props.context.ui.dialog.alert({
@@ -89,7 +89,7 @@ export function Dashboard(props: {
         message: diagnosticsText(result.entries).slice(0, 8_000),
       })
     } catch (cause) {
-      await toast(cause instanceof Error ? cause.message : String(cause), "error")
+      await toast(errorText(cause), "error")
     }
   }
 
@@ -103,7 +103,7 @@ export function Dashboard(props: {
         message: targetsText(result.targets),
       })
     } catch (cause) {
-      await toast(cause instanceof Error ? cause.message : String(cause), "error")
+      await toast(errorText(cause), "error")
     }
   }
 
@@ -227,7 +227,7 @@ export function Dashboard(props: {
       }
       await refresh()
     } catch (cause) {
-      await toast(cause instanceof Error ? cause.message : String(cause), "error")
+      await toast(errorText(cause), "error")
     }
   }
 

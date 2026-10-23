@@ -3,6 +3,7 @@ import type { Context } from "@opencode/plugin/tui/context"
 import { createSignal, onCleanup, onMount } from "solid-js"
 import type { StatusOutput } from "../types"
 import { accountHealthText } from "./format"
+import { modelInput } from "./input"
 import type { MultikeyRpcClient } from "./types"
 
 export function StatusSlot(props: {
@@ -16,15 +17,8 @@ export function StatusSlot(props: {
     if (running) return
     running = true
     try {
-      const model = props.context.ui.model.current()
-      if (!model) {
-        setLabel("MK:-")
-        return
-      }
-      const status = (await props.rpc.status({
-        providerID: model.providerID,
-        modelID: model.modelID,
-      })) as StatusOutput
+      const current = props.context.ui.model.current()
+      const status = (await props.rpc.status(modelInput(current))) as StatusOutput
       if (!status.integrationID || status.accounts.length === 0) {
         setLabel("MK:-")
         return

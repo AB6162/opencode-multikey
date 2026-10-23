@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1
+
+- Fixed the TUI dashboard staying on “Loading…” when OpenCode reports `null` provider/model IDs.
+- Optional RPC inputs now accept `null` as well as missing values.
+- TUI errors now show the RPC message instead of `[object Object]`.
+- Added tests for TUI input sanitization and error formatting.
+
 ## 0.1.0
 
 - Initial OpenCode V2 plugin.

@@ -28,6 +28,23 @@ export function accountLine(account: AccountStatus, now: number): string {
   }`
 }
 
+export function errorText(error: unknown): string {
+  if (error instanceof Error) return error.message
+  if (typeof error === "string") return error
+  if (error && typeof error === "object") {
+    const message = (error as { message?: unknown }).message
+    if (typeof message === "string" && message.length > 0) return message
+    const type = (error as { type?: unknown }).type
+    if (typeof type === "string" && type.length > 0) return type
+    try {
+      return JSON.stringify(error)
+    } catch {
+      // Fall through to String below.
+    }
+  }
+  return String(error)
+}
+
 export function statusHeader(status: StatusOutput | undefined): string {
   if (!status) return "Loading opencode-multikey…"
   if (!status.integrationID) {
