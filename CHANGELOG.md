@@ -1,5 +1,36 @@
 # Changelog
 
+## 0.1.5
+
+- Replaced the custom plugin route with a host-rendered dialog dashboard. This
+  fixes npm installs where the plugin and OpenCode load different Solid
+  instances: data is fetched before the dialog opens, so the screen no longer
+  stays on “Loading accounts…” forever.
+- The dialog uses the same card layout, health colors, legend and key hints.
+- Help is now a host-rendered dialog with every option explained.
+- Account actions refresh the dashboard after they finish.
+- Fixed the key hints showing `[undefined]` instead of the actual keys.
+- Removed the footer status badge, which could not update reliably when the
+  plugin was installed from npm.
+
+## 0.1.4
+
+- Fixed the “Plugin opencode-multikey.tui crashed in route: No renderer found”
+  error. The dashboard now reads terminal dimensions from `context.renderer`
+  instead of importing `useTerminalDimensions()` from `@opentui/solid`, which
+  resolves to a different renderer context in installed plugins.
+
+## 0.1.3
+
+- Redesigned the dashboard with the active OpenCode theme: framed header,
+  account cards, health colors, status legend and keycap footer.
+- Added a `?` help screen that explains balancing, priority vs preferred,
+  selected vs native active, cooldown vs quota, and reset vs remove.
+- Account actions now have categories and descriptions, so similar actions
+  such as "Use", "Activate natively", "Reset" and "Remove" are distinguishable.
+- The account list shows selected, preferred, native-active and disabled state
+  separately, plus quota, cooldown and failure details.
+
 ## 0.1.2
 
 - Fixed the TUI calling the plugin RPC without its location, which made every

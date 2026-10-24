@@ -1,6 +1,8 @@
 import { formatDuration } from "../config"
 import type { AccountStatus, DiagnosticEntry, StatusOutput, TargetSummary } from "../types"
 
+export type HealthTone = "success" | "warning" | "error" | "muted"
+
 export function accountHealthText(account: AccountStatus, now: number): string {
   if (account.healthy) return "healthy"
   if (account.healthReason === "disabled") return "disabled"
@@ -10,6 +12,40 @@ export function accountHealthText(account: AccountStatus, now: number): string {
     return `${account.healthReason ?? "cooldown"} ${formatDuration(until - now)}`
   }
   return account.healthReason ?? "unhealthy"
+}
+
+export function accountHealthTone(account: AccountStatus, now: number): HealthTone {
+  if (!account.enabled) return "muted"
+  if (account.authInvalid) return "error"
+  if (account.cooldownUntil && account.cooldownUntil > now) return "warning"
+  if (account.quota.some((entry) => entry.until > now)) return "warning"
+  return "success"
+}
+
+export function accountMeta(account: AccountStatus, now: number): string {
+  const parts: string[] = []
+  if (account.failures > 0) {
+    parts.push(`${account.failures} failure${account.failures === 1 ? "" : "s"}`)
+  }
+  const quota = account.quota
+    .filter((entry) => entry.until > now)
+    .map(
+      (entry) =>
+        `${entry.modelID}: ${entry.reason} ${formatDuration(entry.until - now)}`,
+    )
+  if (quota.length > 0) parts.push(`quota ${quota.join(", ")}`)
+  if (account.cooldownUntil && account.cooldownUntil > now) {
+    parts.push(
+      `cooldown ${account.cooldownReason ?? "active"} ${formatDuration(account.cooldownUntil - now)}`,
+    )
+  }
+  if (account.lastStatus !== undefined && account.failures > 0) {
+    parts.push(`last HTTP ${account.lastStatus}`)
+  }
+  if (account.lastErrorMessage) {
+    parts.push(account.lastErrorMessage.slice(0, 100))
+  }
+  return parts.length > 0 ? parts.join(" · ") : "No active cooldowns"
 }
 
 export function accountLine(account: AccountStatus, now: number): string {
@@ -55,8 +91,11 @@ export function statusHeader(status: StatusOutput | undefined): string {
 
 export function statusSummary(status: StatusOutput | undefined): string {
   if (!status) return ""
+  const selected = status.accounts.find(
+    (account) => account.credentialID === status.selectedCredentialID,
+  )
   return `balancing ${status.balancingEnabled ? "on" : "off"} · strategy ${status.strategy} · selected ${
-    status.selectedCredentialID ?? "none"
+    selected?.label ?? "none"
   }`
 }
 

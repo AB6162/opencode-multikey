@@ -1,391 +1,610 @@
 /** @jsxImportSource @opentui/solid */
+import { TextAttributes } from "@opentui/core"
 import type { Context } from "@opencode/plugin/tui/context"
-import { For, Show, createSignal, onCleanup, onMount } from "solid-js"
-import type { DiagnosticEntry, StatusOutput, TargetSummary } from "../types"
+import type {
+  AccountStatus,
+  DiagnosticEntry,
+  StatusOutput,
+  TargetSummary,
+} from "../types"
 import {
   accountHealthText,
-  accountLine,
+  accountHealthTone,
+  accountMeta,
   diagnosticsText,
   errorText,
   statusHeader,
-  statusSummary,
   targetsText,
 } from "./format"
+import { KEY_HELP, accountActionOptions, buildHelpLines } from "./help"
 import { modelIDOf, modelInput, textValue } from "./input"
 import type { MultikeyRpcClient } from "./types"
 
-export function Dashboard(props: {
+export type Snapshot = {
+  status: StatusOutput
+  targets: TargetSummary[]
+}
+
+async function load(
+  context: Context,
+  rpc: MultikeyRpcClient,
+): Promise<Snapshot> {
+  const current = await rpc.status(modelInput(context.ui.model.current()))
+  let targets: TargetSummary[] = []
+  try {
+    const result = (await rpc.targets({})) as { targets: TargetSummary[] }
+    targets = result.targets
+  } catch {
+    // A failed provider listing must not hide a valid account snapshot.
+  }
+  return { status: current as StatusOutput, targets }
+}
+
+function toneColor(context: Context, tone: ReturnType<typeof accountHealthTone>) {
+  const theme = context.theme
+  switch (tone) {
+    case "success":
+      return theme.text.feedback.success.base
+    case "warning":
+      return theme.text.feedback.warning.base
+    case "error":
+      return theme.text.feedback.error.base
+    default:
+      return theme.text.faint
+  }
+}
+
+function accountFlags(account: AccountStatus) {
+  return [
+    account.preferred ? "preferred" : undefined,
+    account.nativeActive ? "native active" : undefined,
+    account.enabled ? undefined : "disabled",
+    account.authInvalid ? "auth invalid" : undefined,
+  ].filter((flag): flag is string => Boolean(flag))
+}
+
+function currentModel(context: Context) {
+  return modelInput(context.ui.model.current())
+}
+
+async function showHelp(context: Context, rpc: MultikeyRpcClient) {
+  const width = Math.min(76, Math.max(40, context.renderer.width - 16))
+  const message = buildHelpLines(width)
+    .map((line) => line.text)
+    .join("\n")
+  const closed = context.ui.dialog.alert({
+    title: "Multikey help",
+    message,
+  })
+  context.ui.dialog.set({ size: "large", centered: true })
+  await closed
+  await openDashboard(context, rpc)
+}
+
+async function addAccount(context: Context, rpc: MultikeyRpcClient) {
+  await context.ui.dialog.alert({
+    title: "Add an OpenCode Go key",
+    message:
+      "Use OpenCode's native account flow:\n\n1. Run /connect\n2. Select OpenCode Go\n3. Paste the key\n4. Repeat /connect for every additional key\n\nThe dashboard detects new credentials automatically. The plugin never asks for or stores the key itself.",
+  })
+  await openDashboard(context, rpc)
+}
+
+async function toggleBalancing(
+  context: Context,
+  rpc: MultikeyRpcClient,
+  status: StatusOutput,
+) {
+  try {
+    await rpc.setSettings({ balancingEnabled: !status.balancingEnabled })
+    context.ui.toast.show({
+      message: `Balancing ${status.balancingEnabled ? "disabled" : "enabled"}`,
+      variant: "success",
+    })
+  } catch (cause) {
+    context.ui.toast.show({ message: errorText(cause), variant: "error" })
+  }
+  await openDashboard(context, rpc)
+}
+
+async function showDiagnostics(
+  context: Context,
+  rpc: MultikeyRpcClient,
+  status: StatusOutput,
+) {
+  try {
+    const providerID =
+      textValue(status.providerID) ?? currentModel(context).providerID
+    const result = (await rpc.diagnostics({
+      ...(providerID ? { providerID } : {}),
+      limit: 20,
+    })) as { entries: DiagnosticEntry[] }
+    context.ui.dialog.set({ size: "large", centered: true })
+    await context.ui.dialog.alert({
+      title: "Multikey diagnostics",
+      message: diagnosticsText(result.entries).slice(0, 8_000),
+    })
+  } catch (cause) {
+    context.ui.toast.show({ message: errorText(cause), variant: "error" })
+  }
+  await openDashboard(context, rpc)
+}
+
+async function showTargets(context: Context, rpc: MultikeyRpcClient) {
+  try {
+    const result = (await rpc.targets({})) as { targets: TargetSummary[] }
+    context.ui.dialog.set({ size: "medium", centered: true })
+    await context.ui.dialog.alert({
+      title: "Managed providers",
+      message: targetsText(result.targets),
+    })
+  } catch (cause) {
+    context.ui.toast.show({ message: errorText(cause), variant: "error" })
+  }
+  await openDashboard(context, rpc)
+}
+
+async function accountActions(
+  context: Context,
+  rpc: MultikeyRpcClient,
+  status: StatusOutput,
+) {
+  if (status.accounts.length === 0) {
+    await addAccount(context, rpc)
+    return
+  }
+
+  const credentialID = await context.ui.dialog.select({
+    title: "Multikey account",
+    options: status.accounts.map((account) => ({
+      title: `${account.label} · ${accountHealthText(account, Date.now())}`,
+      value: account.credentialID,
+      description: `#${account.priority} · ${accountMeta(account, Date.now())}`,
+    })),
+  })
+  if (!credentialID) {
+    await openDashboard(context, rpc)
+    return
+  }
+
+  const account = status.accounts.find(
+    (entry) => entry.credentialID === credentialID,
+  )
+  const action = await context.ui.dialog.select({
+    title: `Action: ${account?.label ?? credentialID}`,
+    placeholder: "Choose one action · descriptions explain the difference",
+    options: accountActionOptions(account),
+  })
+  if (!action) {
+    await openDashboard(context, rpc)
+    return
+  }
+
+  try {
+    if (action === "use") {
+      await rpc.use({
+        providerID: status.providerID,
+        credentialID,
+        modelID: modelIDOf(context.ui.model.current()),
+      })
+      context.ui.toast.show({
+        message: `Using ${account?.label ?? credentialID}`,
+        variant: "success",
+      })
+    } else if (action === "up" || action === "down") {
+      const order = status.accounts
+        .slice()
+        .sort((left, right) => left.priority - right.priority)
+        .map((entry) => entry.credentialID)
+      const index = order.indexOf(credentialID)
+      const target = action === "up" ? index - 1 : index + 1
+      if (index >= 0 && target >= 0 && target < order.length) {
+        const [moved] = order.splice(index, 1)
+        order.splice(target, 0, moved)
+        await rpc.setPriority({
+          providerID: status.providerID,
+          credentialIDs: order,
+        })
+        context.ui.toast.show({ message: "Priority updated", variant: "success" })
+      }
+    } else if (action === "toggle") {
+      await rpc.setEnabled({
+        providerID: status.providerID,
+        credentialID,
+        enabled: !(account?.enabled ?? true),
+      })
+    } else if (action === "reset") {
+      await rpc.resetCooldown({
+        providerID: status.providerID,
+        credentialID,
+      })
+      context.ui.toast.show({ message: "Cooldown reset", variant: "success" })
+    } else if (
+      action === "five_hour" ||
+      action === "weekly" ||
+      action === "monthly"
+    ) {
+      await rpc.markCooldown({
+        providerID: status.providerID,
+        credentialID,
+        modelID: modelIDOf(context.ui.model.current()),
+        reason: action,
+      })
+      context.ui.toast.show({
+        message: `Marked as ${action}`,
+        variant: "success",
+      })
+    } else if (action === "rename") {
+      const label = await context.ui.dialog.prompt({
+        title: "Rename account",
+        value: account?.label ?? "",
+      })
+      if (label && label.trim()) {
+        await context.client.credential.update({
+          credentialID,
+          label: label.trim(),
+        })
+      }
+    } else if (action === "activate") {
+      await context.client.credential.activate({ credentialID })
+      context.ui.toast.show({
+        message: "Native active credential changed",
+        variant: "success",
+      })
+    } else if (action === "remove") {
+      const confirmed = await context.ui.dialog.confirm({
+        title: "Remove credential?",
+        message: `This removes ${account?.label ?? credentialID} from OpenCode, not only from the balancer.`,
+        label: { confirm: "Remove", cancel: "Cancel" },
+      })
+      if (confirmed) {
+        await context.client.credential.remove({ credentialID })
+        context.ui.toast.show({ message: "Credential removed", variant: "success" })
+      }
+    }
+  } catch (cause) {
+    context.ui.toast.show({ message: errorText(cause), variant: "error" })
+  }
+  await openDashboard(context, rpc)
+}
+
+function KeyHint(props: { context: Context; shortcut: string; label: string }) {
+  return (
+    <box flexDirection="row" gap={1}>
+      <text fg={props.context.theme.text.action.primary.base}>
+        {`[${props.shortcut}]`}
+      </text>
+      <text fg={props.context.theme.text.muted}>{props.label}</text>
+    </box>
+  )
+}
+
+export function DashboardPanel(props: {
   context: Context
   rpc: MultikeyRpcClient
+  snapshot: Snapshot
 }) {
-  const [status, setStatus] = createSignal<StatusOutput | undefined>()
-  const [targets, setTargets] = createSignal<TargetSummary[]>([])
-  const [error, setError] = createSignal<string | undefined>()
-  const [loaded, setLoaded] = createSignal(false)
-  const [loading, setLoading] = createSignal(false)
-  const [now, setNow] = createSignal(Date.now())
-  let running = false
-
-  const model = () => props.context.ui.model.current()
-  const currentInput = () => modelInput(model())
-  const modelID = () => modelIDOf(model())
-
-  async function refresh() {
-    if (running) return
-    running = true
-    setLoading(true)
-    try {
-      const next = (await props.rpc.status(currentInput())) as StatusOutput
-      setStatus(next)
-      setLoaded(true)
-      setError(undefined)
-      try {
-        const targetResult = (await props.rpc.targets({})) as {
-          targets: TargetSummary[]
-        }
-        setTargets(targetResult.targets)
-      } catch (cause) {
-        // A failed provider listing must not hide a valid account snapshot.
-        setError(errorText(cause))
-      }
-    } catch (cause) {
-      setError(errorText(cause))
-    } finally {
-      running = false
-      setLoading(false)
-    }
-  }
-
-  function closeDashboard() {
-    props.context.ui.router.navigate({ type: "home" })
-  }
-
-  function headerText(): string {
-    if (status()) return statusHeader(status())
-    if (error()) return "Unable to load opencode-multikey."
-    return "Loading opencode-multikey…"
-  }
-
-  async function toast(message: string, variant: "info" | "success" | "warning" | "error" = "info") {
-    props.context.ui.toast.show({ message, variant })
-  }
-
-  async function addAccount() {
-    await props.context.ui.dialog.alert({
-      title: "Add an OpenCode Go key",
-      message:
-        "Use OpenCode's native account flow:\n\n1. Run /connect\n2. Select OpenCode Go\n3. Paste the key\n4. Repeat /connect for every additional key\n\nThe dashboard detects new credentials automatically. The plugin never asks for or stores the key itself.",
-    })
-  }
-
-  async function toggleBalancing() {
-    const current = status()
-    if (!current) return
-    try {
-      await props.rpc.setSettings({
-        balancingEnabled: !current.balancingEnabled,
-      })
-      await refresh()
-      await toast(
-        `Balancing ${current.balancingEnabled ? "disabled" : "enabled"}`,
-        "success",
-      )
-    } catch (cause) {
-      await toast(errorText(cause), "error")
-    }
-  }
-
-  async function showDiagnostics() {
-    try {
-      const current = status()
-      const providerID =
-        textValue(current?.providerID) ?? currentInput().providerID
-      const result = (await props.rpc.diagnostics({
-        ...(providerID ? { providerID } : {}),
-        limit: 20,
-      })) as { entries: DiagnosticEntry[] }
-      await props.context.ui.dialog.alert({
-        title: "Multikey diagnostics",
-        message: diagnosticsText(result.entries).slice(0, 8_000),
-      })
-    } catch (cause) {
-      await toast(errorText(cause), "error")
-    }
-  }
-
-  async function showTargets() {
-    try {
-      const result = (await props.rpc.targets({})) as {
-        targets: TargetSummary[]
-      }
-      await props.context.ui.dialog.alert({
-        title: "Managed providers",
-        message: targetsText(result.targets),
-      })
-    } catch (cause) {
-      await toast(errorText(cause), "error")
-    }
-  }
-
-  async function accountActions() {
-    const current = status()
-    if (!current || current.accounts.length === 0) {
-      await addAccount()
-      return
-    }
-
-    const credentialID = await props.context.ui.dialog.select({
-      title: "Multikey account",
-      options: current.accounts.map((account) => ({
-        title: `${account.label} · ${accountHealthText(account, now())}`,
-        value: account.credentialID,
-        description: `#${account.priority}${
-          account.preferred ? " · preferred" : ""
-        }${account.nativeActive ? " · native active" : ""}${
-          account.failures > 0 ? ` · ${account.failures} failures` : ""
-        }`,
-      })),
-    })
-    if (!credentialID) return
-
-    const account = current.accounts.find(
-      (entry) => entry.credentialID === credentialID,
+  const context = props.context
+  const theme = () => context.theme
+  const status = () => props.snapshot.status
+  const accounts = () => status().accounts
+  const selected = () =>
+    accounts().find(
+      (account) => account.credentialID === status().selectedCredentialID,
     )
-    const action = await props.context.ui.dialog.select({
-      title: `Action: ${account?.label ?? credentialID}`,
-      options: [
-        { title: "Use / make preferred", value: "use" },
-        { title: "Move up in priority", value: "up" },
-        { title: "Move down in priority", value: "down" },
-        {
-          title: account?.enabled ? "Disable in balancer" : "Enable in balancer",
-          value: "toggle",
-        },
-        { title: "Reset cooldown / auth state", value: "reset" },
-        { title: "Mark 5-hour limit", value: "five_hour" },
-        { title: "Mark weekly limit", value: "weekly" },
-        { title: "Mark monthly limit", value: "monthly" },
-        { title: "Rename", value: "rename" },
-        { title: "Activate natively in OpenCode", value: "activate" },
-        { title: "Remove credential", value: "remove" },
-      ],
-    })
-    if (!action) return
+  const native = () =>
+    accounts().find(
+      (account) => account.credentialID === status().nativeActiveCredentialID,
+    )
+  const healthy = () => accounts().filter((account) => account.healthy).length
 
-    try {
-      if (action === "use") {
-        await props.rpc.use({
-          providerID: current.providerID,
-          credentialID,
-          modelID: modelID(),
-        })
-        await toast(`Using ${account?.label ?? credentialID}`, "success")
-      } else if (action === "up" || action === "down") {
-        const order = current.accounts
-          .slice()
-          .sort((left, right) => left.priority - right.priority)
-          .map((entry) => entry.credentialID)
-        const index = order.indexOf(credentialID)
-        const target = action === "up" ? index - 1 : index + 1
-        if (index >= 0 && target >= 0 && target < order.length) {
-          const [moved] = order.splice(index, 1)
-          order.splice(target, 0, moved)
-          await props.rpc.setPriority({
-            providerID: current.providerID,
-            credentialIDs: order,
-          })
-          await toast("Priority updated", "success")
-        }
-      } else if (action === "toggle") {
-        await props.rpc.setEnabled({
-          providerID: current.providerID,
-          credentialID,
-          enabled: !(account?.enabled ?? true),
-        })
-      } else if (action === "reset") {
-        await props.rpc.resetCooldown({
-          providerID: current.providerID,
-          credentialID,
-        })
-        await toast("Cooldown reset", "success")
-      } else if (
-        action === "five_hour" ||
-        action === "weekly" ||
-        action === "monthly"
-      ) {
-        await props.rpc.markCooldown({
-          providerID: current.providerID,
-          credentialID,
-          modelID: modelID(),
-          reason: action,
-        })
-        await toast(`Marked as ${action}`, "success")
-      } else if (action === "rename") {
-        const label = await props.context.ui.dialog.prompt({
-          title: "Rename account",
-          value: account?.label ?? "",
-        })
-        if (label && label.trim()) {
-          await props.context.client.credential.update({
-            credentialID,
-            label: label.trim(),
-          })
-        }
-      } else if (action === "activate") {
-        await props.context.client.credential.activate({ credentialID })
-        await toast("Native active credential changed", "success")
-      } else if (action === "remove") {
-        const confirmed = await props.context.ui.dialog.confirm({
-          title: "Remove credential?",
-          message: `This removes ${account?.label ?? credentialID} from OpenCode, not only from the balancer.`,
-          label: { confirm: "Remove", cancel: "Cancel" },
-        })
-        if (confirmed) {
-          await props.context.client.credential.remove({ credentialID })
-          await toast("Credential removed", "success")
-        }
-      }
-      await refresh()
-    } catch (cause) {
-      await toast(errorText(cause), "error")
-    }
-  }
-
-  // Register the page commands from the component body so they exist even if
-  // one of the data subscriptions below fails. OpenCode disposes layers that
-  // a component creates when the route unmounts.
-  props.context.keymap.layer(() => ({
+  context.keymap.layer(() => ({
     mode: "global",
-    // Let an open dialog keep escape for itself; this layer only needs it when
-    // the dashboard is the topmost surface.
     priority: -1,
     commands: [
       {
-        id: "opencode-multikey.close",
-        title: "Close Multikey dashboard",
+        id: "opencode-multikey.help",
+        title: "Multikey help",
         group: "Multikey",
-        palette: true,
-        bind: "escape",
-        run: () => closeDashboard(),
+        bind: "?",
+        run: () => void showHelp(context, props.rpc),
       },
       {
         id: "opencode-multikey.actions",
         title: "Multikey account actions",
         group: "Multikey",
-        palette: true,
         bind: "a",
-        run: () => void accountActions(),
+        run: () => void accountActions(context, props.rpc, status()),
       },
       {
         id: "opencode-multikey.add",
         title: "Add a Multikey account",
         group: "Multikey",
-        palette: true,
         bind: "n",
-        run: () => void addAccount(),
+        run: () => void addAccount(context, props.rpc),
       },
       {
         id: "opencode-multikey.toggle",
         title: "Toggle Multikey balancing",
         group: "Multikey",
-        palette: true,
         bind: "b",
-        run: () => void toggleBalancing(),
+        run: () => void toggleBalancing(context, props.rpc, status()),
       },
       {
         id: "opencode-multikey.diagnostics",
         title: "Show Multikey diagnostics",
         group: "Multikey",
-        palette: true,
         bind: "g",
-        run: () => void showDiagnostics(),
+        run: () => void showDiagnostics(context, props.rpc, status()),
       },
       {
         id: "opencode-multikey.targets",
         title: "Show managed providers",
         group: "Multikey",
-        palette: true,
         bind: "t",
-        run: () => void showTargets(),
+        run: () => void showTargets(context, props.rpc),
       },
       {
         id: "opencode-multikey.refresh",
         title: "Refresh Multikey",
         group: "Multikey",
-        palette: true,
         bind: "r",
-        run: () => void refresh(),
+        run: () => void openDashboard(context, props.rpc),
       },
     ],
   }))
 
-  onMount(() => {
-    void refresh()
-    const clock = setInterval(() => setNow(Date.now()), 1_000)
-    const poll = setInterval(() => void refresh(), 10_000)
-    const offCredential = props.context.data.on("credential.updated", () => {
-      void refresh()
-    })
-    const offSwitched = props.context.data.on("credential.switched", () => {
-      void refresh()
-    })
-    const offIntegration = props.context.data.on("integration.updated", () => {
-      void refresh()
-    })
-    const offRpc = props.rpc.events.on("updated", () => {
-      void refresh()
-    })
-
-    onCleanup(() => {
-      clearInterval(clock)
-      clearInterval(poll)
-      offCredential()
-      offSwitched()
-      offIntegration()
-      offRpc()
-    })
-  })
-
   return (
-    <box flexDirection="column" padding={1}>
-      <text>opencode-multikey</text>
-      <text>{headerText()}</text>
-      <Show when={status()}>
-        <text>{statusSummary(status())}</text>
-      </Show>
-      <Show when={loading() && status()}>
-        <text>Refreshing…</text>
-      </Show>
-      <Show when={error()}>
-        <text>{`Error: ${error()}`}</text>
-        <text>Press r to retry or esc to return home.</text>
-      </Show>
-      <Show when={loaded() && status() && !status()?.integrationID}>
-        <text>
-          This provider is not managed by opencode-multikey. Press t to list
-          managed providers.
-        </text>
-      </Show>
-      <Show
-        when={
-          loaded() &&
-          (status()?.integrationID?.length ?? 0) > 0 &&
-          (status()?.accounts.length ?? 0) === 0
-        }
+    <box
+      width="100%"
+      flexDirection="column"
+      padding={1}
+      gap={1}
+      backgroundColor={theme().background.base}
+    >
+      <box
+        width="100%"
+        flexDirection="column"
+        border
+        borderStyle="rounded"
+        borderColor={theme().border.base}
+        backgroundColor={theme().background.raised.base}
+        paddingLeft={2}
+        paddingRight={2}
+        paddingTop={1}
+        paddingBottom={1}
       >
-        <text>No key accounts. Press n for instructions.</text>
-      </Show>
-      <For each={status()?.accounts ?? []}>
-        {(account) => <text>{accountLine(account, now())}</text>}
-      </For>
-      <Show when={targets().length > 0}>
-        <text>{`Managed: ${targets()
-          .map((target) => target.providerID)
-          .join(", ")}`}</text>
-      </Show>
-      <text>
-        esc close · a account actions · n add key · b toggle balancing · g diagnostics · t providers · r refresh
-      </text>
+        <box width="100%" flexDirection="row" alignItems="center">
+          <text attributes={TextAttributes.BOLD} fg={theme().text.base}>
+            OPENCODE MULTIKEY
+          </text>
+          <box flexGrow={1} />
+          <text
+            fg={
+              status().balancingEnabled
+                ? theme().text.feedback.success.base
+                : theme().text.feedback.warning.base
+            }
+          >
+            {status().balancingEnabled ? "● balancing on" : "○ balancing off"}
+          </text>
+        </box>
+        <text fg={theme().text.muted}>{statusHeader(status())}</text>
+        <box
+          width="100%"
+          flexDirection="row"
+          flexWrap="wrap"
+          columnGap={2}
+          rowGap={0}
+          marginTop={1}
+        >
+          <box flexDirection="row" gap={1}>
+            <text fg={theme().text.faint}>Selected for this model:</text>
+            <text fg={theme().text.base}>{selected()?.label ?? "none"}</text>
+          </box>
+          <box flexDirection="row" gap={1}>
+            <text fg={theme().text.faint}>Native active:</text>
+            <text fg={theme().text.base}>{native()?.label ?? "none"}</text>
+          </box>
+          <box flexDirection="row" gap={1}>
+            <text fg={theme().text.faint}>Accounts:</text>
+            <text fg={theme().text.base}>
+              {`${healthy()}/${accounts().length} healthy`}
+            </text>
+          </box>
+        </box>
+        <text fg={theme().text.faint}>
+          {`strategy ${status().strategy} · sync native ${
+            status().syncActive ? "on" : "off"
+          } · diagnostics ${status().diagnostics ? "on" : "off"}`}
+        </text>
+      </box>
+
+      <box width="100%" flexDirection="column" gap={1}>
+        <box width="100%" flexDirection="row">
+          <text attributes={TextAttributes.BOLD} fg={theme().text.muted}>
+            ACCOUNTS
+          </text>
+          <box flexGrow={1} />
+          <text fg={theme().text.faint}>
+            {`${healthy()}/${accounts().length} healthy`}
+          </text>
+        </box>
+
+        {status().integrationID === undefined ? (
+          <box
+            width="100%"
+            flexDirection="column"
+            border
+            borderStyle="rounded"
+            borderColor={theme().text.feedback.warning.base}
+            backgroundColor={theme().background.raised.base}
+            padding={1}
+            gap={1}
+          >
+            <text
+              attributes={TextAttributes.BOLD}
+              fg={theme().text.feedback.warning.base}
+            >
+              Provider not managed
+            </text>
+            <text fg={theme().text.muted} wrapMode="word" width="100%">
+              The current model's provider is not managed by opencode-multikey.
+              Press t to list managed providers, or add its ID to the providers
+              option.
+            </text>
+          </box>
+        ) : null}
+
+        {status().integrationID !== undefined && accounts().length === 0 ? (
+          <box
+            width="100%"
+            flexDirection="column"
+            border
+            borderStyle="rounded"
+            borderColor={theme().text.feedback.warning.base}
+            backgroundColor={theme().background.raised.base}
+            padding={1}
+            gap={1}
+          >
+            <text
+              attributes={TextAttributes.BOLD}
+              fg={theme().text.feedback.warning.base}
+            >
+              No key accounts yet
+            </text>
+            <text fg={theme().text.muted} wrapMode="word" width="100%">
+              Run /connect, select OpenCode Go and paste a key. Repeat /connect
+              for every additional key. Keys stay in OpenCode; this plugin never
+              stores them.
+            </text>
+            <text fg={theme().text.faint}>
+              Press n to see these instructions at any time.
+            </text>
+          </box>
+        ) : null}
+
+        {accounts().map((account) => {
+          const tone = () => accountHealthTone(account, Date.now())
+          const isSelected = () =>
+            account.credentialID === status().selectedCredentialID
+          return (
+            <box
+              width="100%"
+              flexDirection="row"
+              border={["left"]}
+              borderColor={toneColor(context, tone())}
+              backgroundColor={theme().background.raised.base}
+              paddingLeft={1}
+              paddingRight={1}
+              gap={1}
+            >
+              <box width={4} flexShrink={0}>
+                <text fg={theme().text.faint}>{`#${account.priority}`}</text>
+              </box>
+              <box flexGrow={1} flexDirection="column" minWidth={0} gap={0}>
+                <box flexDirection="row" flexWrap="wrap" columnGap={1}>
+                  <text attributes={TextAttributes.BOLD} fg={theme().text.base}>
+                    {account.label}
+                  </text>
+                  {isSelected() ? (
+                    <text fg={theme().text.action.primary.base}>selected</text>
+                  ) : null}
+                  {accountFlags(account).map((flag) => (
+                    <text fg={theme().text.faint}>{flag}</text>
+                  ))}
+                </box>
+                <text fg={theme().text.faint} wrapMode="word" width="100%">
+                  {accountMeta(account, Date.now())}
+                </text>
+              </box>
+              <box flexShrink={0}>
+                <text fg={toneColor(context, tone())}>
+                  {`● ${accountHealthText(account, Date.now())}`}
+                </text>
+              </box>
+            </box>
+          )
+        })}
+
+        {accounts().length > 0 ? (
+          <box
+            width="100%"
+            flexDirection="row"
+            flexWrap="wrap"
+            columnGap={2}
+            paddingLeft={1}
+          >
+            <text fg={theme().text.feedback.success.base}>● healthy</text>
+            <text fg={theme().text.feedback.warning.base}>
+              ● cooling / quota
+            </text>
+            <text fg={theme().text.feedback.error.base}>● auth invalid</text>
+            <text fg={theme().text.faint}>● disabled</text>
+          </box>
+        ) : null}
+      </box>
+
+      {props.snapshot.targets.length > 0 ? (
+        <box width="100%" flexDirection="row" gap={1} paddingLeft={1}>
+          <text fg={theme().text.faint}>Managed:</text>
+          <text fg={theme().text.muted}>
+            {props.snapshot.targets
+              .map((target) => target.providerID)
+              .join(", ")}
+          </text>
+        </box>
+      ) : null}
+
+      <box
+        width="100%"
+        flexDirection="column"
+        border={["top"]}
+        borderColor={theme().border.base}
+        paddingTop={1}
+        gap={1}
+      >
+        <box
+          width="100%"
+          flexDirection="row"
+          flexWrap="wrap"
+          columnGap={2}
+          rowGap={1}
+        >
+          {KEY_HELP.map((item) => (
+            <KeyHint
+              context={context}
+              shortcut={item.key}
+              label={item.label}
+            />
+          ))}
+        </box>
+        <text fg={theme().text.faint} wrapMode="word" width="100%">
+          The balancer changes only the key. It never changes the model or
+          provider.
+        </text>
+      </box>
     </box>
   )
+}
+
+export async function openDashboard(
+  context: Context,
+  rpc: MultikeyRpcClient,
+): Promise<void> {
+  let snapshot: Snapshot
+  try {
+    snapshot = await load(context, rpc)
+  } catch (cause) {
+    context.ui.dialog.set({ size: "medium", centered: true })
+    await context.ui.dialog.alert({
+      title: "opencode-multikey",
+      message: errorText(cause),
+    })
+    return
+  }
+  context.ui.dialog.show(() => (
+    <DashboardPanel context={context} rpc={rpc} snapshot={snapshot} />
+  ))
+  context.ui.dialog.set({ size: "xlarge", centered: true })
 }

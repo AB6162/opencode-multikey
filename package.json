@@ -1,6 +1,6 @@
 {
   "name": "opencode-multikey",
-  "version": "0.1.2",
+  "version": "0.1.5",
   "description": "Multi-key credential failover for OpenCode V2 providers, including OpenCode Go.",
   "type": "module",
   "license": "MIT",

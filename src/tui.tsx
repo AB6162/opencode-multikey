@@ -1,29 +1,13 @@
 /** @jsxImportSource @opentui/solid */
 import { Plugin } from "@opencode/plugin/tui"
 import { MultikeyRpc } from "./rpc"
-import { Dashboard } from "./tui/dashboard"
-import { StatusSlot } from "./tui/status-slot"
+import { openDashboard } from "./tui/dashboard"
 import { sameDirectory, scopedRpc } from "./tui/types"
 
 export default Plugin.define({
   id: "opencode-multikey.tui",
   setup(context) {
     const rpc = scopedRpc(context, context.client.rpc(MultikeyRpc))
-
-    const unregisterRoute = context.ui.router.register({
-      name: "opencode-multikey",
-      render: () => <Dashboard context={context} rpc={rpc} />,
-    })
-
-    const disposeSlot = context.ui.slot({
-      append: "home.footer.status",
-      render: () => <StatusSlot context={context} rpc={rpc} />,
-    })
-
-    const disposePromptSlot = context.ui.slot({
-      append: "prompt.footer.status",
-      render: () => <StatusSlot context={context} rpc={rpc} />,
-    })
 
     context.keymap.layer(() => ({
       mode: "global",
@@ -36,10 +20,7 @@ export default Plugin.define({
           palette: true,
           slash: { name: "multikey", aliases: ["mk"] },
           run: () => {
-            context.ui.router.navigate({
-              type: "plugin",
-              name: "opencode-multikey",
-            })
+            void openDashboard(context, rpc)
           },
         },
       ],
@@ -51,10 +32,7 @@ export default Plugin.define({
         : rpc.events.on("updated", (event) => {
             const location = context.location ?? context.data.location.default()
             if (
-              !sameDirectory(
-                event.location?.directory,
-                location?.directory,
-              )
+              !sameDirectory(event.location?.directory, location?.directory)
             ) {
               return
             }
@@ -101,9 +79,6 @@ export default Plugin.define({
 
     return () => {
       offUpdates?.()
-      unregisterRoute()
-      disposeSlot()
-      disposePromptSlot()
     }
   },
 })

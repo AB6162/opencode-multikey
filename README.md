@@ -67,7 +67,7 @@ To pin a version:
 
 ```jsonc
 {
-  "plugins": ["opencode-multikey@0.1.2"]
+  "plugins": ["opencode-multikey@0.1.5"]
 }
 ```
 
@@ -111,7 +111,7 @@ OpenCode V2 already supports multiple accounts per integration:
 
 If selecting an already-connected provider opens its account list, use the add-account action and repeat for each key.
 
-The plugin detects new credentials through `credential.updated` and refreshes the dashboard automatically. The key is entered only in OpenCode's native `/connect` flow; `opencode-multikey` never stores keys in its own storage.
+The next time you open the dashboard it includes any new credentials. The key is entered only in OpenCode's native `/connect` flow; `opencode-multikey` never stores keys in its own storage.
 
 > Two keys from the same workspace may share the same Go quota. For real failover, use keys whose quotas are independent.
 
@@ -131,13 +131,16 @@ The dashboard shows:
 - each key's priority, native-active flag, health, cooldown and per-model quota,
 - optional diagnostics.
 
-A compact `MK:key` indicator is added to the home and prompt footer status slots.
+The dashboard opens as a host-rendered OpenCode dialog, so it works the same
+when the plugin is installed from npm or loaded from a local directory. Each
+time it opens it loads a fresh snapshot of the accounts.
 
 Dashboard keys:
 
 | Key | Action |
 | --- | --- |
-| `esc` | Close the dashboard and return to OpenCode |
+| `esc` | Close help first, then close the dashboard and return to OpenCode |
+| `?` | Show or hide the help screen |
 | `a` | Account actions: use, move up/down in priority, enable/disable, reset cooldown/auth, mark 5h/weekly/monthly, rename, activate natively, remove |
 | `n` | Instructions to add another key through `/connect` |
 | `b` | Toggle balancing on/off |
@@ -146,6 +149,34 @@ Dashboard keys:
 | `r` | Refresh |
 
 There is no default global keybind, so the plugin does not collide with OpenCode's bindings.
+
+### What the dashboard shows
+
+The dashboard deliberately separates concepts that are easy to confuse:
+
+- **Balancing** — When on, the plugin chooses a healthy key for each request. When off, OpenCode uses its native active key and the plugin does not fail over.
+- **Priority / preferred** — The list order is the failover order. `#1` is preferred and is tried first. `Use` moves a key to `#1`; `Move up` and `Move down` change the order one place at a time.
+- **Selected for this model** — The key the balancer would use right now. It changes when a key cools down or a quota resets.
+- **Native active** — The key OpenCode itself marked active. The balancer can use another key without changing it. `syncActive` keeps both aligned after a failover.
+- **Healthy** — No cooldown, no auth error and no quota block for the current model.
+- **Cooldown vs quota** — A cooldown blocks the whole key after a rate limit or server error. A quota blocks only one model for a 5-hour, weekly or monthly window.
+- **Disabled** — The key stays in OpenCode but the balancer will not choose it.
+
+### Account actions explained
+
+| Action | What it does | What it does not do |
+| --- | --- | --- |
+| Use for new requests (move to #1) | Makes the key preferred and first in the balancer order | Does not change OpenCode's native active key |
+| Move up / Move down | Changes the failover order by one place | Does not use the key immediately |
+| Enable / Disable in balancer | Includes or excludes the key from automatic balancing | Does not delete the credential |
+| Reset cooldown and auth state | Clears temporary cooldowns and auth-invalid state | Does not delete the key or change priority |
+| Mark 5-hour / weekly / monthly limit | Blocks the key for the current model for that window | Does not affect other models |
+| Rename label | Changes only the display label | Does not change the credential or routing |
+| Activate natively in OpenCode | Changes OpenCode's native active key | Does not change balancer priority |
+| Remove credential from OpenCode | Deletes the credential from OpenCode permanently | Cannot be undone from the dashboard |
+
+The same explanations are available inside the dashboard with `?`; the account
+action picker also shows a description for every action.
 
 ## How it works
 
@@ -328,14 +359,13 @@ OAuth and well-known accounts cannot be migrated automatically; reconnect them w
 | --- | --- |
 | Plugin does not load | `plugins` is plural; OpenCode is V2; restart OpenCode |
 | Dashboard does not appear | The package is listed in `opencode.json`; no `tui.json` is needed; try `/multikey` |
-| Dashboard stays on “Loading…” | Update to `opencode-multikey@0.1.2` or newer and restart OpenCode |
+| Dashboard stays on “Loading…” | Update to `opencode-multikey@0.1.5` or newer and restart OpenCode |
 | `opencode plugin list` does not show it | Check the config scope (global vs project) and restart the service |
 | No accounts | Run `/connect` twice and select OpenCode Go each time |
 | Provider is not managed | `providers` includes the provider ID; check the dashboard's `t` view |
 | Key does not switch | Enable `diagnostics`; check the error type/status; add a custom `quotaPatterns` entry |
 | Both keys cooling | Wait for the reset, use the dashboard to reset a cooldown, or add another independent key |
 | Key was removed | The next refresh prunes its local state automatically |
-| TUI shows `MK:-` | The current model's provider is not managed or has no key accounts |
 
 Logs:
 
@@ -423,8 +453,8 @@ Before publishing:
 4. Commit and tag the release:
 
 ```bash
-git tag v0.1.2
-git push origin v0.1.2
+git tag v0.1.5
+git push origin v0.1.5
 ```
 
 The package publishes TypeScript source. OpenCode loads it with Bun.
@@ -432,9 +462,9 @@ The package publishes TypeScript source. OpenCode loads it with Bun.
 ## Validation performed
 
 - TypeScript typecheck against `@opencode/plugin` 2.1.4.
-- 84 unit, TUI and hook-flow tests.
+- 96 unit, TUI and hook-flow tests.
 - Loaded with OpenCode 2.1.3 as a local plugin with `features: { server: true, tui: true }` and state `active`.
-- Verified the dashboard end-to-end with OpenCode 2.1.3's headless TUI: the saved OpenCode Go account renders with its location-scoped RPC, and `escape` returns to the home screen.
+- Verified the dialog dashboard end-to-end with OpenCode 2.1.3's headless TUI using the npm package: the saved OpenCode Go account renders with its location-scoped RPC, `?` opens the help dialog, and `escape` closes help, then closes the dashboard.
 - Manual end-to-end test with a fake OpenAI-compatible provider: key A returned `429 GoUsageLimitError` with `retry-after: 18000`, key B returned a valid SSE response, and OpenCode completed the run. No real provider quota was consumed.
 - `npm pack` tarball imported successfully as `opencode-multikey`, `opencode-multikey/rpc` and `opencode-multikey/tui`.
 - `npm publish --dry-run` completed successfully.
