@@ -1,9 +1,13 @@
 {
   "name": "opencode-multikey",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "description": "Multi-key credential failover for OpenCode V2 providers, including OpenCode Go.",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/AB6162/opencode-multikey.git"
+  },
   "publishConfig": {
     "access": "public"
   },

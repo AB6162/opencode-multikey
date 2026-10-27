@@ -15,6 +15,11 @@ opencode-go/glm-5.3
   key B  → retry succeeds
 ```
 
+### Github Repo
+
+[Link](https://github.com/AB6162/opencode-multikey)
+
+
 ## Why
 
 - OpenCode Go limits are per model: 5-hour, weekly and monthly windows.
